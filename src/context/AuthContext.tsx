@@ -15,6 +15,7 @@ import {
   createAddress,
   getUserAddresses,
   getServiceAreas,
+  checkUserIdExists,
 } from '../services/database';
 
 interface AuthContextType {
@@ -144,9 +145,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     addressData?: any
   ): Promise<boolean> => {
     try {
-      // Check if user already exists
-      const { data: existingUser } = await getUserByUserId(userData.userId);
-      if (existingUser) {
+      // Check if user already exists using the new function
+      const userExists = await checkUserIdExists(userData.userId);
+      if (userExists) {
         console.error('User already exists');
         return false;
       }

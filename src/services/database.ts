@@ -48,6 +48,25 @@ export const getCurrentUser = async () => {
   }
 };
 
+// Helper function to check if user ID exists (for registration)
+export const checkUserIdExists = async (userId: string) => {
+  try {
+    const { data, error } = await supabase.rpc('check_user_id_exists', {
+      user_id_param: userId
+    });
+    
+    if (error) {
+      console.error('Check user ID exists error:', error);
+      return false;
+    }
+    
+    return data === true;
+  } catch (err) {
+    console.error('Check user ID exists exception:', err);
+    return false;
+  }
+};
+
 // User functions
 export const createUser = async (userData: Omit<User, 'id' | 'addresses'>) => {
   try {
