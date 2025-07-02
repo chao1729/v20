@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, MapPin, Plus, Minus, ShoppingCart, AlertTriangle, Clock } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Address, Order, OrderItem, InventoryItem, ServiceArea } from '../../types';
+import { getInventoryByArea, createOrder, createOrderMessage } from '../../services/database';
 
 export const BookingForm: React.FC = () => {
   const { user } = useAuth();
@@ -10,16 +11,10 @@ export const BookingForm: React.FC = () => {
   const [preferredTime, setPreferredTime] = useState('');
   const [cart, setCart] = useState<OrderItem[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
-  const [serviceAreas, setServiceAreas] = useState<ServiceArea[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Load service areas
-    const savedAreas = localStorage.getItem('serviceAreas');
-    if (savedAreas) {
-      setServiceAreas(JSON.parse(savedAreas));
-    }
-
     // Set default address
     if (user?.addresses && user.addresses.length > 0) {
       const defaultAddress = user.addresses.find(addr => addr.isDefault) || user.addresses[0];
@@ -34,18 +29,29 @@ export const BookingForm: React.FC = () => {
 
   useEffect(() => {
     // Load inventory based on selected address area
-    if (selectedAddress) {
-      const area = serviceAreas.find(a => a.id === selectedAddress.areaId);
-      if (area) {
-        const savedInventory = localStorage.getItem('inventory');
-        if (savedInventory) {
-          const allInventory = JSON.parse(savedInventory);
-          const vendorInventory = allInventory.filter((item: InventoryItem) => item.vendorId === area.vendorId);
-          setInventory(vendorInventory);
-        }
-      }
+    if (selectedAddress && selectedAddress.areaId) {
+      loadInventory(selectedAddress.areaId);
     }
-  }, [selectedAddress, serviceAreas]);
+  }, [selectedAddress]);
+
+  const loadInventory = async (areaId: string) => {
+    try {
+      const { data, error } = await getInventoryByArea(areaId);
+      if (!error && data) {
+        const inventoryItems: InventoryItem[] = data.map(item => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          stock: item.stock,
+          description: item.description,
+          vendorId: item.vendor_id,
+        }));
+        setInventory(inventoryItems);
+      }
+    } catch (error) {
+      console.error('Error loading inventory:', error);
+    }
+  };
 
   const addToCart = (item: InventoryItem) => {
     if (item.stock === 0) return;
@@ -91,7 +97,7 @@ export const BookingForm: React.FC = () => {
     return cartItem?.quantity || 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!selectedAddress || cart.length === 0) {
@@ -104,53 +110,61 @@ export const BookingForm: React.FC = () => {
       return;
     }
 
-    const area = serviceAreas.find(a => a.id === selectedAddress.areaId);
-    if (!area) {
-      alert('Service area not found');
-      return;
+    if (!user) return;
+
+    setLoading(true);
+
+    try {
+      // Find vendor from inventory
+      const vendorId = inventory[0]?.vendorId;
+      if (!vendorId) {
+        alert('No vendor found for this area');
+        setLoading(false);
+        return;
+      }
+
+      // Create order
+      const { data: orderData, error: orderError } = await createOrder({
+        customerId: user.id,
+        customerName: user.name,
+        customerPhone: user.phone || '',
+        customerUserId: user.userId,
+        address: selectedAddress,
+        items: cart,
+        total: getTotalPrice(),
+        status: 'pending',
+        deliveryDate: deliveryDate,
+        preferredTime: preferredTime,
+        vendorId: vendorId,
+        vendorName: '', // Will be filled by the database
+        areaId: selectedAddress.areaId,
+      });
+
+      if (orderError) {
+        console.error('Order creation error:', orderError);
+        alert('Failed to create order. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      // Show celebration animation
+      setShowCelebration(true);
+      setTimeout(() => setShowCelebration(false), 3000);
+
+      // Clear form
+      setCart([]);
+      setPreferredTime('');
+    } catch (error) {
+      console.error('Error creating order:', error);
+      alert('Failed to create order. Please try again.');
+    } finally {
+      setLoading(false);
     }
-
-    const newOrder: Order = {
-      id: Date.now().toString(),
-      customerId: user!.id,
-      customerName: user!.name,
-      customerPhone: user!.phone || '',
-      customerUserId: user!.userId,
-      address: selectedAddress,
-      items: cart,
-      total: getTotalPrice(),
-      status: 'pending',
-      orderDate: new Date().toISOString(),
-      deliveryDate: deliveryDate,
-      preferredTime: preferredTime,
-      vendorId: area.vendorId,
-      vendorName: area.vendorName,
-      areaId: area.id,
-      messages: [],
-    };
-
-    // Save order
-    const orders = JSON.parse(localStorage.getItem('orders') || '[]');
-    orders.push(newOrder);
-    localStorage.setItem('orders', JSON.stringify(orders));
-
-    // Show celebration animation
-    setShowCelebration(true);
-    setTimeout(() => setShowCelebration(false), 3000);
-
-    // Clear form
-    setCart([]);
-    setPreferredTime('');
   };
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString('en-GB'); // DD/MM/YYYY format
-  };
-
-  const getAreaName = (areaId: string) => {
-    const area = serviceAreas.find(a => a.id === areaId);
-    return area ? `${area.name} - ${area.vendorName}` : 'Unknown Area';
   };
 
   return (
@@ -190,10 +204,6 @@ export const BookingForm: React.FC = () => {
                     />
                     <span className="text-sm">
                       <strong>{address.label}</strong> - {address.street}, {address.city}, {address.state} {address.zipCode}
-                      <br />
-                      <span className="text-blue-600 text-xs ml-6">
-                        Service Area: {getAreaName(address.areaId)}
-                      </span>
                     </span>
                   </label>
                 ))}
@@ -235,7 +245,7 @@ export const BookingForm: React.FC = () => {
               required
               value={preferredTime}
               onChange={(e) => setPreferredTime(e.target.value)}
-              placeholder="8pm"
+              placeholder="e.g., 8pm, Morning, Afternoon"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -246,7 +256,7 @@ export const BookingForm: React.FC = () => {
       {selectedAddress && (
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Available Products - {getAreaName(selectedAddress.areaId)}
+            Available Products
           </h3>
           {inventory.length === 0 ? (
             <div className="text-center py-8">
@@ -337,9 +347,10 @@ export const BookingForm: React.FC = () => {
             <span className="text-lg font-semibold">Total: ₹{getTotalPrice().toFixed(2)}</span>
             <button
               onClick={handleSubmit}
-              className="bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+              disabled={loading}
+              className="bg-blue-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
             >
-              Place Order
+              {loading ? 'Placing Order...' : 'Place Order'}
             </button>
           </div>
         </div>

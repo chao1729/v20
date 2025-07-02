@@ -36,10 +36,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Check if user is logged in
     getCurrentUser().then(async (authUser) => {
-      if (authUser) {
+      if (authUser && authUser.email) {
+        // Extract userId from email (remove @aquaflow.local)
+        const userId = authUser.email.replace('@aquaflow.local', '');
+        
         // Get user data from our users table
-        const { data: userData } = await getUserByUserId(authUser.email?.replace('@aquaflow.local', '') || '');
-        if (userData) {
+        const { data: userData, error } = await getUserByUserId(userId);
+        if (!error && userData) {
           // Get user addresses if customer
           let addresses: Address[] = [];
           if (userData.user_type === 'customer') {
@@ -88,12 +91,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // First check if user exists in our database
       const { data: userData, error: userError } = await getUserByUserId(userId);
       if (userError || !userData || userData.user_type !== userType) {
+        console.error('User not found or type mismatch:', userError);
         return false;
       }
 
       // Sign in with Supabase Auth using userId as email
       const { error } = await signIn(`${userId}@aquaflow.local`, password);
       if (error) {
+        console.error('Auth sign in error:', error);
         return false;
       }
 
@@ -142,15 +147,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Check if user already exists
       const { data: existingUser } = await getUserByUserId(userData.userId);
       if (existingUser) {
+        console.error('User already exists');
         return false;
       }
 
       // Sign up with Supabase Auth using userId as email
-      const { error: authError } = await signUp(`${userData.userId}@aquaflow.local`, userData.password);
+      const { data: authData, error: authError } = await signUp(`${userData.userId}@aquaflow.local`, userData.password);
       if (authError) {
         console.error('Auth signup error:', authError);
         return false;
       }
+
+      // Wait a moment for auth user to be created
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Create user in our database
       const { data: newUser, error: userError } = await createUser({
@@ -164,6 +173,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (userError || !newUser) {
         console.error('User creation error:', userError);
+        // Clean up auth user if database creation failed
+        await signOut();
         return false;
       }
 
