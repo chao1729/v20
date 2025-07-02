@@ -3,29 +3,49 @@ import { User, Address, ServiceArea, Order, OrderItem, InventoryItem, Invoice, O
 
 // Auth functions
 export const signUp = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-  });
-  return { data, error };
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+    return { data, error };
+  } catch (err) {
+    console.error('SignUp error:', err);
+    return { data: null, error: err };
+  }
 };
 
 export const signIn = async (email: string, password: string) => {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-  return { data, error };
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    return { data, error };
+  } catch (err) {
+    console.error('SignIn error:', err);
+    return { data: null, error: err };
+  }
 };
 
 export const signOut = async () => {
-  const { error } = await supabase.auth.signOut();
-  return { error };
+  try {
+    const { error } = await supabase.auth.signOut();
+    return { error };
+  } catch (err) {
+    console.error('SignOut error:', err);
+    return { error: err };
+  }
 };
 
 export const getCurrentUser = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    return user;
+  } catch (err) {
+    console.error('GetCurrentUser error:', err);
+    return null;
+  }
 };
 
 // User functions
@@ -36,17 +56,22 @@ export const createUser = async (userData: Omit<User, 'id' | 'addresses'>) => {
       .insert({
         user_id: userData.userId,
         name: userData.name,
-        phone: userData.phone,
+        phone: userData.phone || null,
         user_type: userData.type,
-        area_id: userData.areaId,
-        service_area: userData.serviceArea,
+        area_id: userData.areaId || null,
+        service_area: userData.serviceArea || null,
       })
       .select()
       .single();
 
-    return { data, error };
+    if (error) {
+      console.error('Create user error:', error);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
   } catch (err) {
-    console.error('Error creating user:', err);
+    console.error('Create user exception:', err);
     return { data: null, error: err };
   }
 };
@@ -59,30 +84,39 @@ export const getUserByUserId = async (userId: string) => {
       .eq('user_id', userId)
       .single();
 
+    if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
+      console.error('Get user by userId error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error getting user by userId:', err);
+    console.error('Get user by userId exception:', err);
     return { data: null, error: err };
   }
 };
 
 export const updateUser = async (id: string, updates: Partial<User>) => {
   try {
+    const updateData: any = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.phone !== undefined) updateData.phone = updates.phone;
+    if (updates.areaId !== undefined) updateData.area_id = updates.areaId;
+    if (updates.serviceArea !== undefined) updateData.service_area = updates.serviceArea;
+
     const { data, error } = await supabase
       .from('users')
-      .update({
-        name: updates.name,
-        phone: updates.phone,
-        area_id: updates.areaId,
-        service_area: updates.serviceArea,
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
 
+    if (error) {
+      console.error('Update user error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating user:', err);
+    console.error('Update user exception:', err);
     return { data: null, error: err };
   }
 };
@@ -94,9 +128,13 @@ export const deleteUser = async (id: string) => {
       .delete()
       .eq('id', id);
 
+    if (error) {
+      console.error('Delete user error:', error);
+    }
+
     return { error };
   } catch (err) {
-    console.error('Error deleting user:', err);
+    console.error('Delete user exception:', err);
     return { error: err };
   }
 };
@@ -109,9 +147,13 @@ export const getServiceAreas = async () => {
       .select('*')
       .order('created_at', { ascending: false });
 
+    if (error) {
+      console.error('Get service areas error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error getting service areas:', err);
+    console.error('Get service areas exception:', err);
     return { data: null, error: err };
   }
 };
@@ -128,29 +170,38 @@ export const createServiceArea = async (areaData: Omit<ServiceArea, 'id' | 'crea
       .select()
       .single();
 
+    if (error) {
+      console.error('Create service area error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error creating service area:', err);
+    console.error('Create service area exception:', err);
     return { data: null, error: err };
   }
 };
 
 export const updateServiceArea = async (id: string, updates: Partial<ServiceArea>) => {
   try {
+    const updateData: any = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.vendorId !== undefined) updateData.vendor_id = updates.vendorId;
+    if (updates.vendorName !== undefined) updateData.vendor_name = updates.vendorName;
+
     const { data, error } = await supabase
       .from('service_areas')
-      .update({
-        name: updates.name,
-        vendor_id: updates.vendorId,
-        vendor_name: updates.vendorName,
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
 
+    if (error) {
+      console.error('Update service area error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating service area:', err);
+    console.error('Update service area exception:', err);
     return { data: null, error: err };
   }
 };
@@ -162,9 +213,13 @@ export const deleteServiceArea = async (vendorId: string) => {
       .delete()
       .eq('vendor_id', vendorId);
 
+    if (error) {
+      console.error('Delete service area error:', error);
+    }
+
     return { error };
   } catch (err) {
-    console.error('Error deleting service area:', err);
+    console.error('Delete service area exception:', err);
     return { error: err };
   }
 };
@@ -178,9 +233,13 @@ export const getUserAddresses = async (userId: string) => {
       .eq('user_id', userId)
       .order('is_default', { ascending: false });
 
+    if (error) {
+      console.error('Get user addresses error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error getting user addresses:', err);
+    console.error('Get user addresses exception:', err);
     return { data: null, error: err };
   }
 };
@@ -205,14 +264,18 @@ export const createAddress = async (addressData: Omit<Address, 'id'> & { userId:
         state: addressData.state,
         zip_code: addressData.zipCode,
         is_default: addressData.isDefault,
-        area_id: addressData.areaId,
+        area_id: addressData.areaId || null,
       })
       .select()
       .single();
 
+    if (error) {
+      console.error('Create address error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error creating address:', err);
+    console.error('Create address exception:', err);
     return { data: null, error: err };
   }
 };
@@ -235,24 +298,29 @@ export const updateAddress = async (id: string, updates: Partial<Address> & { is
       }
     }
 
+    const updateData: any = {};
+    if (updates.label !== undefined) updateData.label = updates.label;
+    if (updates.street !== undefined) updateData.street = updates.street;
+    if (updates.city !== undefined) updateData.city = updates.city;
+    if (updates.state !== undefined) updateData.state = updates.state;
+    if (updates.zipCode !== undefined) updateData.zip_code = updates.zipCode;
+    if (updates.isDefault !== undefined) updateData.is_default = updates.isDefault;
+    if (updates.areaId !== undefined) updateData.area_id = updates.areaId;
+
     const { data, error } = await supabase
       .from('addresses')
-      .update({
-        label: updates.label,
-        street: updates.street,
-        city: updates.city,
-        state: updates.state,
-        zip_code: updates.zipCode,
-        is_default: updates.isDefault,
-        area_id: updates.areaId,
-      })
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
 
+    if (error) {
+      console.error('Update address error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating address:', err);
+    console.error('Update address exception:', err);
     return { data: null, error: err };
   }
 };
@@ -264,9 +332,13 @@ export const deleteAddress = async (id: string) => {
       .delete()
       .eq('id', id);
 
+    if (error) {
+      console.error('Delete address error:', error);
+    }
+
     return { error };
   } catch (err) {
-    console.error('Error deleting address:', err);
+    console.error('Delete address exception:', err);
     return { error: err };
   }
 };
@@ -280,9 +352,13 @@ export const getInventoryByVendor = async (vendorId: string) => {
       .eq('vendor_id', vendorId)
       .order('created_at', { ascending: false });
 
+    if (error) {
+      console.error('Get inventory by vendor error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error getting inventory by vendor:', err);
+    console.error('Get inventory by vendor exception:', err);
     return { data: null, error: err };
   }
 };
@@ -297,6 +373,7 @@ export const getInventoryByArea = async (areaId: string) => {
       .single();
 
     if (areaError || !area) {
+      console.error('Get area error:', areaError);
       return { data: null, error: areaError };
     }
 
@@ -306,9 +383,13 @@ export const getInventoryByArea = async (areaId: string) => {
       .select('*')
       .eq('vendor_id', area.vendor_id);
 
+    if (error) {
+      console.error('Get inventory by area error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error getting inventory by area:', err);
+    console.error('Get inventory by area exception:', err);
     return { data: null, error: err };
   }
 };
@@ -322,14 +403,18 @@ export const createInventoryItem = async (itemData: Omit<InventoryItem, 'id'>) =
         name: itemData.name,
         price: itemData.price,
         stock: itemData.stock,
-        description: itemData.description,
+        description: itemData.description || '',
       })
       .select()
       .single();
 
+    if (error) {
+      console.error('Create inventory item error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error creating inventory item:', err);
+    console.error('Create inventory item exception:', err);
     return { data: null, error: err };
   }
 };
@@ -349,9 +434,13 @@ export const updateInventoryItem = async (id: string, updates: Partial<Inventory
       .select()
       .single();
 
+    if (error) {
+      console.error('Update inventory item error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating inventory item:', err);
+    console.error('Update inventory item exception:', err);
     return { data: null, error: err };
   }
 };
@@ -363,9 +452,13 @@ export const deleteInventoryItem = async (id: string) => {
       .delete()
       .eq('id', id);
 
+    if (error) {
+      console.error('Delete inventory item error:', error);
+    }
+
     return { error };
   } catch (err) {
-    console.error('Error deleting inventory item:', err);
+    console.error('Delete inventory item exception:', err);
     return { error: err };
   }
 };
@@ -379,11 +472,16 @@ export const getOrdersByCustomer = async (customerId: string) => {
       .eq('customer_id', customerId)
       .order('created_at', { ascending: false });
 
-    if (ordersError || !orders) {
+    if (ordersError) {
+      console.error('Get orders by customer error:', ordersError);
       return { data: null, error: ordersError };
     }
 
-    // Get order items and messages for each order
+    if (!orders || orders.length === 0) {
+      return { data: [], error: null };
+    }
+
+    // Get order items, messages, and addresses for each order
     const ordersWithDetails = await Promise.all(
       orders.map(async (order) => {
         const [itemsResult, messagesResult, addressResult] = await Promise.all([
@@ -403,7 +501,7 @@ export const getOrdersByCustomer = async (customerId: string) => {
 
     return { data: ordersWithDetails, error: null };
   } catch (err) {
-    console.error('Error getting orders by customer:', err);
+    console.error('Get orders by customer exception:', err);
     return { data: null, error: err };
   }
 };
@@ -416,11 +514,16 @@ export const getOrdersByVendor = async (vendorId: string) => {
       .eq('vendor_id', vendorId)
       .order('created_at', { ascending: false });
 
-    if (ordersError || !orders) {
+    if (ordersError) {
+      console.error('Get orders by vendor error:', ordersError);
       return { data: null, error: ordersError };
     }
 
-    // Get order items and messages for each order
+    if (!orders || orders.length === 0) {
+      return { data: [], error: null };
+    }
+
+    // Get order items, messages, and addresses for each order
     const ordersWithDetails = await Promise.all(
       orders.map(async (order) => {
         const [itemsResult, messagesResult, addressResult] = await Promise.all([
@@ -440,13 +543,20 @@ export const getOrdersByVendor = async (vendorId: string) => {
 
     return { data: ordersWithDetails, error: null };
   } catch (err) {
-    console.error('Error getting orders by vendor:', err);
+    console.error('Get orders by vendor exception:', err);
     return { data: null, error: err };
   }
 };
 
 export const createOrder = async (orderData: Omit<Order, 'id' | 'orderDate' | 'messages' | 'items'> & { items: OrderItem[] }) => {
   try {
+    // Get vendor name from vendor ID
+    const { data: vendor } = await supabase
+      .from('users')
+      .select('name')
+      .eq('id', orderData.vendorId)
+      .single();
+
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
@@ -455,7 +565,7 @@ export const createOrder = async (orderData: Omit<Order, 'id' | 'orderDate' | 'm
         customer_phone: orderData.customerPhone,
         customer_user_id: orderData.customerUserId,
         vendor_id: orderData.vendorId,
-        vendor_name: orderData.vendorName,
+        vendor_name: vendor?.name || 'Unknown Vendor',
         area_id: orderData.areaId,
         address_id: orderData.address.id,
         total: orderData.total,
@@ -465,30 +575,34 @@ export const createOrder = async (orderData: Omit<Order, 'id' | 'orderDate' | 'm
       .select()
       .single();
 
-    if (orderError || !order) {
+    if (orderError) {
+      console.error('Create order error:', orderError);
       return { data: null, error: orderError };
     }
 
     // Insert order items
-    const orderItems = orderData.items.map(item => ({
-      order_id: order.id,
-      inventory_item_id: item.id,
-      name: item.name,
-      quantity: item.quantity,
-      price: item.price,
-    }));
+    if (orderData.items.length > 0) {
+      const orderItems = orderData.items.map(item => ({
+        order_id: order.id,
+        inventory_item_id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+      }));
 
-    const { error: itemsError } = await supabase
-      .from('order_items')
-      .insert(orderItems);
+      const { error: itemsError } = await supabase
+        .from('order_items')
+        .insert(orderItems);
 
-    if (itemsError) {
-      return { data: null, error: itemsError };
+      if (itemsError) {
+        console.error('Create order items error:', itemsError);
+        return { data: null, error: itemsError };
+      }
     }
 
     return { data: order, error: null };
   } catch (err) {
-    console.error('Error creating order:', err);
+    console.error('Create order exception:', err);
     return { data: null, error: err };
   }
 };
@@ -502,9 +616,13 @@ export const updateOrderStatus = async (id: string, status: Order['status']) => 
       .select()
       .single();
 
+    if (error) {
+      console.error('Update order status error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating order status:', err);
+    console.error('Update order status exception:', err);
     return { data: null, error: err };
   }
 };
@@ -518,9 +636,13 @@ export const updateOrderInvoiceId = async (id: string, invoiceId: string) => {
       .select()
       .single();
 
+    if (error) {
+      console.error('Update order invoice ID error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating order invoice ID:', err);
+    console.error('Update order invoice ID exception:', err);
     return { data: null, error: err };
   }
 };
@@ -539,9 +661,13 @@ export const createOrderMessage = async (messageData: Omit<OrderMessage, 'id' | 
       .select()
       .single();
 
+    if (error) {
+      console.error('Create order message error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error creating order message:', err);
+    console.error('Create order message exception:', err);
     return { data: null, error: err };
   }
 };
@@ -558,9 +684,13 @@ export const getInvoicesByVendor = async (vendorId: string) => {
       .eq('orders.vendor_id', vendorId)
       .order('created_at', { ascending: false });
 
+    if (error) {
+      console.error('Get invoices by vendor error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error getting invoices by vendor:', err);
+    console.error('Get invoices by vendor exception:', err);
     return { data: null, error: err };
   }
 };
@@ -579,9 +709,13 @@ export const createInvoice = async (invoiceData: Omit<Invoice, 'generatedDate'>)
       .select()
       .single();
 
+    if (error) {
+      console.error('Create invoice error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error creating invoice:', err);
+    console.error('Create invoice exception:', err);
     return { data: null, error: err };
   }
 };
@@ -595,9 +729,13 @@ export const updateInvoiceStatus = async (id: string, status: Invoice['status'])
       .select()
       .single();
 
+    if (error) {
+      console.error('Update invoice status error:', error);
+    }
+
     return { data, error };
   } catch (err) {
-    console.error('Error updating invoice status:', err);
+    console.error('Update invoice status exception:', err);
     return { data: null, error: err };
   }
 };

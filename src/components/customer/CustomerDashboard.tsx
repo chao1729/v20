@@ -5,6 +5,7 @@ import { BookingForm } from './BookingForm';
 import { OrderHistory } from './OrderHistory';
 import { AddressManager } from './AddressManager';
 import { Order } from '../../types';
+import { getOrdersByCustomer } from '../../services/database';
 
 export const CustomerDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -21,20 +22,76 @@ export const CustomerDashboard: React.FC = () => {
     loadOrders(currentMonth);
   }, [user]);
 
-  const loadOrders = (month: string) => {
-    const savedOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    const userOrders = savedOrders.filter((order: Order) => order.customerId === user?.id);
-    
-    if (month) {
-      const [year, monthNum] = month.split('-');
-      const filteredOrders = userOrders.filter((order: Order) => {
-        const orderDate = new Date(order.orderDate);
-        return orderDate.getFullYear() === parseInt(year) && 
-               orderDate.getMonth() === parseInt(monthNum) - 1;
-      });
-      setOrders(filteredOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
-    } else {
-      setOrders(userOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
+  const loadOrders = async (month?: string) => {
+    if (!user) return;
+
+    try {
+      const { data: orderData, error } = await getOrdersByCustomer(user.id);
+      if (!error && orderData) {
+        // Transform database orders to application format
+        const transformedOrders: Order[] = orderData.map(order => ({
+          id: order.id,
+          customerId: order.customer_id,
+          customerName: order.customer_name,
+          customerPhone: order.customer_phone,
+          customerUserId: order.customer_user_id,
+          vendorId: order.vendor_id,
+          vendorName: order.vendor_name,
+          areaId: order.area_id,
+          address: order.address ? {
+            id: order.address.id,
+            label: order.address.label,
+            street: order.address.street,
+            city: order.address.city,
+            state: order.address.state,
+            zipCode: order.address.zip_code,
+            isDefault: order.address.is_default,
+            areaId: order.address.area_id || '',
+          } : {
+            id: '',
+            label: 'Unknown',
+            street: '',
+            city: '',
+            state: '',
+            zipCode: '',
+            isDefault: false,
+            areaId: '',
+          },
+          items: order.order_items?.map(item => ({
+            id: item.inventory_item_id || item.id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+          })) || [],
+          total: order.total,
+          status: order.status,
+          orderDate: order.order_date || order.created_at,
+          deliveryDate: order.delivery_date,
+          preferredTime: order.preferred_time,
+          invoiceId: order.invoice_id,
+          messages: order.order_messages?.map(msg => ({
+            id: msg.id,
+            sender: msg.sender,
+            senderName: msg.sender_name,
+            message: msg.message,
+            timestamp: msg.created_at,
+          })) || [],
+        }));
+
+        if (month) {
+          const [year, monthNum] = month.split('-');
+          const filteredOrders = transformedOrders.filter((order: Order) => {
+            const orderDate = new Date(order.orderDate);
+            return orderDate.getFullYear() === parseInt(year) && 
+                   orderDate.getMonth() === parseInt(monthNum) - 1;
+          });
+          setOrders(filteredOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
+        } else {
+          setOrders(transformedOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading orders:', error);
     }
   };
 
@@ -45,11 +102,8 @@ export const CustomerDashboard: React.FC = () => {
   };
 
   const getAvailableMonths = () => {
-    const savedOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    const userOrders = savedOrders.filter((order: Order) => order.customerId === user?.id);
-    
     const months = new Set<string>();
-    userOrders.forEach((order: Order) => {
+    orders.forEach((order: Order) => {
       const date = new Date(order.orderDate);
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       months.add(monthKey);

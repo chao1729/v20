@@ -5,6 +5,7 @@ import { OrderManagement } from './OrderManagement';
 import { InventoryManager } from './InventoryManager';
 import { InvoiceManager } from './InvoiceManager';
 import { Order, MonthlyReport } from '../../types';
+import { getOrdersByVendor } from '../../services/database';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 
@@ -26,12 +27,68 @@ export const VendorDashboard: React.FC = () => {
     loadOrders();
   }, [user]);
 
-  const loadOrders = () => {
-    const savedOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    // Filter orders for this vendor's area only
-    const vendorOrders = savedOrders.filter((order: Order) => order.vendorId === user?.id);
-    setOrders(vendorOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
-    generateMonthlyReports(vendorOrders);
+  const loadOrders = async () => {
+    if (!user) return;
+
+    try {
+      const { data: orderData, error } = await getOrdersByVendor(user.id);
+      if (!error && orderData) {
+        // Transform database orders to application format
+        const transformedOrders: Order[] = orderData.map(order => ({
+          id: order.id,
+          customerId: order.customer_id,
+          customerName: order.customer_name,
+          customerPhone: order.customer_phone,
+          customerUserId: order.customer_user_id,
+          vendorId: order.vendor_id,
+          vendorName: order.vendor_name,
+          areaId: order.area_id,
+          address: order.address ? {
+            id: order.address.id,
+            label: order.address.label,
+            street: order.address.street,
+            city: order.address.city,
+            state: order.address.state,
+            zipCode: order.address.zip_code,
+            isDefault: order.address.is_default,
+            areaId: order.address.area_id || '',
+          } : {
+            id: '',
+            label: 'Unknown',
+            street: '',
+            city: '',
+            state: '',
+            zipCode: '',
+            isDefault: false,
+            areaId: '',
+          },
+          items: order.order_items?.map(item => ({
+            id: item.inventory_item_id || item.id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+          })) || [],
+          total: order.total,
+          status: order.status,
+          orderDate: order.order_date || order.created_at,
+          deliveryDate: order.delivery_date,
+          preferredTime: order.preferred_time,
+          invoiceId: order.invoice_id,
+          messages: order.order_messages?.map(msg => ({
+            id: msg.id,
+            sender: msg.sender,
+            senderName: msg.sender_name,
+            message: msg.message,
+            timestamp: msg.created_at,
+          })) || [],
+        }));
+
+        setOrders(transformedOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
+        generateMonthlyReports(transformedOrders);
+      }
+    } catch (error) {
+      console.error('Error loading orders:', error);
+    }
   };
 
   const generateMonthlyReports = (ordersList: Order[]) => {

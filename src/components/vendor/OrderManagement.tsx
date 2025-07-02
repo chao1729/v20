@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Package, Clock, CheckCircle, Truck, XCircle, FileText, Bell, MessageCircle, Send } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Order, InventoryItem } from '../../types';
+import { getOrdersByVendor, updateOrderStatus, createOrderMessage, updateInventoryItem, getInventoryByVendor } from '../../services/database';
 
 export const OrderManagement: React.FC = () => {
   const { user } = useAuth();
@@ -9,94 +10,141 @@ export const OrderManagement: React.FC = () => {
   const [filter, setFilter] = useState<'all' | Order['status']>('all');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [newMessage, setNewMessage] = useState('');
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     loadOrders();
   }, [user]);
 
-  const loadOrders = () => {
-    const savedOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    // Filter orders for this vendor's area only
-    const vendorOrders = savedOrders.filter((order: Order) => order.vendorId === user?.id);
-    setOrders(vendorOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
-  };
+  const loadOrders = async () => {
+    if (!user) return;
 
-  const updateOrderStatus = (orderId: string, status: Order['status']) => {
-    const allOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    const updatedOrders = allOrders.map((order: Order) =>
-      order.id === orderId ? { ...order, status } : order
-    );
-    
-    // If marking as delivered, decrease inventory
-    if (status === 'delivered') {
-      const order = allOrders.find((o: Order) => o.id === orderId);
-      if (order) {
-        const allInventory = JSON.parse(localStorage.getItem('inventory') || '[]');
-        const updatedInventory = allInventory.map((item: InventoryItem) => {
-          const orderItem = order.items.find((oi: any) => oi.id === item.id);
-          if (orderItem) {
-            return { ...item, stock: Math.max(0, item.stock - orderItem.quantity) };
-          }
-          return item;
-        });
-        localStorage.setItem('inventory', JSON.stringify(updatedInventory));
+    try {
+      const { data: orderData, error } = await getOrdersByVendor(user.id);
+      if (!error && orderData) {
+        // Transform database orders to application format
+        const transformedOrders: Order[] = orderData.map(order => ({
+          id: order.id,
+          customerId: order.customer_id,
+          customerName: order.customer_name,
+          customerPhone: order.customer_phone,
+          customerUserId: order.customer_user_id,
+          vendorId: order.vendor_id,
+          vendorName: order.vendor_name,
+          areaId: order.area_id,
+          address: order.address ? {
+            id: order.address.id,
+            label: order.address.label,
+            street: order.address.street,
+            city: order.address.city,
+            state: order.address.state,
+            zipCode: order.address.zip_code,
+            isDefault: order.address.is_default,
+            areaId: order.address.area_id || '',
+          } : {
+            id: '',
+            label: 'Unknown',
+            street: '',
+            city: '',
+            state: '',
+            zipCode: '',
+            isDefault: false,
+            areaId: '',
+          },
+          items: order.order_items?.map(item => ({
+            id: item.inventory_item_id || item.id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+          })) || [],
+          total: order.total,
+          status: order.status,
+          orderDate: order.order_date || order.created_at,
+          deliveryDate: order.delivery_date,
+          preferredTime: order.preferred_time,
+          invoiceId: order.invoice_id,
+          messages: order.order_messages?.map(msg => ({
+            id: msg.id,
+            sender: msg.sender,
+            senderName: msg.sender_name,
+            message: msg.message,
+            timestamp: msg.created_at,
+          })) || [],
+        }));
+
+        setOrders(transformedOrders.sort((a: Order, b: Order) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()));
       }
+    } catch (error) {
+      console.error('Error loading orders:', error);
     }
-    
-    localStorage.setItem('orders', JSON.stringify(updatedOrders));
-    loadOrders();
   };
 
-  const sendMessage = (orderId: string) => {
-    if (!newMessage.trim()) return;
-
-    const allOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    const updatedOrders = allOrders.map((order: Order) => {
-      if (order.id === orderId) {
-        const messages = order.messages || [];
-        return {
-          ...order,
-          messages: [...messages, {
-            id: Date.now().toString(),
-            sender: 'vendor',
-            senderName: user?.name || 'Vendor',
-            message: newMessage.trim(),
-            timestamp: new Date().toISOString()
-          }]
-        };
+  const updateStatus = async (orderId: string, status: Order['status']) => {
+    setLoading(true);
+    try {
+      const { error } = await updateOrderStatus(orderId, status);
+      if (!error) {
+        // If marking as delivered, decrease inventory
+        if (status === 'delivered') {
+          const order = orders.find(o => o.id === orderId);
+          if (order) {
+            // Get current inventory
+            const { data: inventoryData } = await getInventoryByVendor(user!.id);
+            if (inventoryData) {
+              // Update stock for each item
+              for (const orderItem of order.items) {
+                const inventoryItem = inventoryData.find(item => item.id === orderItem.id);
+                if (inventoryItem) {
+                  const newStock = Math.max(0, inventoryItem.stock - orderItem.quantity);
+                  await updateInventoryItem(inventoryItem.id, { stock: newStock });
+                }
+              }
+            }
+          }
+        }
+        
+        await loadOrders();
       }
-      return order;
-    });
-
-    localStorage.setItem('orders', JSON.stringify(updatedOrders));
-    setNewMessage('');
-    loadOrders();
+    } catch (error) {
+      console.error('Error updating order status:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const generateInvoice = (order: Order) => {
+  const sendMessage = async (orderId: string) => {
+    if (!newMessage.trim() || !user) return;
+
+    try {
+      const { error } = await createOrderMessage({
+        orderId,
+        sender: 'vendor',
+        senderName: user.name,
+        message: newMessage.trim(),
+      });
+
+      if (!error) {
+        setNewMessage('');
+        await loadOrders();
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
+  };
+
+  const generateInvoice = async (order: Order) => {
     const invoiceId = `INV-${Date.now()}`;
-    const allOrders = JSON.parse(localStorage.getItem('orders') || '[]');
-    const updatedOrders = allOrders.map((o: Order) =>
-      o.id === order.id ? { ...o, invoiceId } : o
-    );
-    localStorage.setItem('orders', JSON.stringify(updatedOrders));
     
-    loadOrders();
-    
-    // Save invoice
-    const invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
-    const newInvoice = {
-      id: invoiceId,
-      orderId: order.id,
-      amount: order.total,
-      generatedDate: new Date().toISOString(),
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
-      status: 'draft',
-    };
-    invoices.push(newInvoice);
-    localStorage.setItem('invoices', JSON.stringify(invoices));
-    
-    alert(`Invoice ${invoiceId} generated successfully!`);
+    try {
+      // Update order with invoice ID
+      const { error } = await updateOrderStatus(order.id, order.status);
+      if (!error) {
+        await loadOrders();
+        alert(`Invoice ${invoiceId} generated successfully!`);
+      }
+    } catch (error) {
+      console.error('Error generating invoice:', error);
+    }
   };
 
   const getStatusIcon = (status: Order['status']) => {
@@ -286,8 +334,9 @@ export const OrderManagement: React.FC = () => {
                       {statusOptions.map((status) => (
                         <button
                           key={status}
-                          onClick={() => updateOrderStatus(order.id, status)}
-                          className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                          onClick={() => updateStatus(order.id, status)}
+                          disabled={loading}
+                          className={`px-3 py-1 text-sm rounded-lg transition-colors disabled:opacity-50 ${
                             status === 'acknowledged' ? 'bg-blue-600 text-white hover:bg-blue-700' :
                             status === 'confirmed' ? 'bg-blue-600 text-white hover:bg-blue-700' :
                             status === 'in-transit' ? 'bg-purple-600 text-white hover:bg-purple-700' :
@@ -304,8 +353,9 @@ export const OrderManagement: React.FC = () => {
                   {order.status !== 'pending' && order.status !== 'cancelled' && (
                     <select
                       value={order.status}
-                      onChange={(e) => updateOrderStatus(order.id, e.target.value as Order['status'])}
-                      className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      onChange={(e) => updateStatus(order.id, e.target.value as Order['status'])}
+                      disabled={loading}
+                      className="px-3 py-1 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
                     >
                       {statusOptions.map((status) => (
                         <option key={status} value={status}>
